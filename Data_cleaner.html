@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real Estate Data Cleaner</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load SheetJS (xlsx library) for reading and writing Excel files -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <!-- Set Inter font for aesthetics -->
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen p-4 sm:p-8">
+
+    <div class="max-w-4xl mx-auto bg-white shadow-xl rounded-xl p-6 md:p-10">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl font-extrabold text-blue-800">WhatsApp Data Prep Tool</h1>
+            <p class="text-gray-500 mt-2">Clean, deduplicate, and standardize agent data for blast campaigns.</p>
+        </header>
+
+        <!-- Configuration Section -->
+        <section class="mb-8 p-6 bg-blue-50 rounded-lg border border-blue-200">
+            <h2 class="text-xl font-semibold text-blue-700 mb-4">Configuration</h2>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                
+                <!-- Name Column Input -->
+                <div>
+                    <label for="nameColumn" class="block text-sm font-medium text-gray-700 mb-1">
+                        1. Name Column Header
+                    </label>
+                    <input type="text" id="nameColumn" value="Name"
+                           class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                           placeholder="e.g., Client Name, Full Name">
+                    <p class="text-xs text-gray-400 mt-1">Must exactly match the column header for names.</p>
+                </div>
+                
+                <!-- Contact Column Input -->
+                <div>
+                    <label for="contactColumn" class="block text-sm font-medium text-gray-700 mb-1">
+                        2. Contact Number Column Header
+                    </label>
+                    <input type="text" id="contactColumn" value="Phone Number"
+                           class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                           placeholder="e.g., Phone, Mobile">
+                    <p class="text-xs text-gray-400 mt-1">Used for cleaning and deduplication.</p>
+                </div>
+
+                <!-- Country Prefix Input -->
+                <div>
+                    <label for="countryPrefix" class="block text-sm font-medium text-gray-700 mb-1">
+                        3. Default Local Country Code
+                    </label>
+                    <input type="text" id="countryPrefix" value="+971"
+                           class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                           placeholder="e.g., +971, +966">
+                    <p class="text-xs text-gray-400 mt-1">Applied only if a number is missing a country code.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- File Upload Section -->
+        <section class="flex flex-col items-center justify-center space-y-4">
+            <input type="file" id="excelFile" accept=".xlsx, .xls, .csv" class="hidden" onchange="displayFileName(this)">
+            <label for="excelFile" id="fileLabel"
+                   class="cursor-pointer w-full p-6 text-center border-2 border-dashed border-blue-400 rounded-xl bg-blue-50 hover:bg-blue-100 transition duration-150">
+                <svg class="mx-auto h-12 w-12 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 014 4v16a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h4zM16 10l-4-4m0 0L8 10m4-4v12"></path>
+                </svg>
+                <span class="mt-2 block text-sm font-medium text-blue-600">Click to upload your Excel/CSV file</span>
+                <span id="fileNameDisplay" class="text-xs text-gray-500 mt-1 block">No file selected.</span>
+            </label>
+
+            <button onclick="processData()" id="processButton" disabled
+                    class="w-full md:w-auto px-8 py-3 bg-gray-400 text-white font-bold rounded-full transition duration-300 shadow-md disabled:opacity-50">
+                Start Cleaning & Standardization
+            </button>
+        </section>
+
+        <!-- Results and Status -->
+        <section class="mt-10 p-6 bg-gray-100 rounded-xl">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">Results</h2>
+            <div id="statusMessage" class="text-center text-sm text-gray-600 mb-4">
+                Please upload a file and click 'Start Cleaning'.
+            </div>
+
+            <div id="summary" class="hidden bg-white p-4 rounded-lg border border-gray-200 shadow-inner space-y-2">
+                <p class="text-green-600 font-medium">✨ Cleaning Complete!</p>
+                <p>Initial Records: <span id="initialCount" class="font-bold">0</span></p>
+                <p>Empty/Null/Invalid Rows Removed: <span id="emptyRemoved" class="font-bold">0</span></p>
+                <p>Duplicates Removed: <span id="duplicatesRemoved" class="font-bold">0</span></p>
+                <p>Final Clean Records: <span id="finalCount" class="font-bold">0</span></p>
+            </div>
+
+            <a id="downloadLink" href="#" download="cleaned_whatsapp_data.xlsx"
+               class="mt-6 hidden w-full md:w-auto mx-auto justify-center items-center px-8 py-3 bg-green-600 text-white font-bold rounded-full shadow-lg hover:bg-green-700 transition duration-300">
+                Download Cleaned Data (Name and Phone Only)
+            </a>
+        </section>
+
+        <!-- Message Box for Alerts (No alert() calls) -->
+        <div id="messageBox" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+            <div class="bg-white p-6 rounded-xl shadow-2xl max-w-sm w-full">
+                <h3 id="messageTitle" class="text-lg font-bold mb-3 text-red-600">Error</h3>
+                <p id="messageContent" class="text-gray-700 mb-4">An unknown error occurred.</p>
+                <button onclick="hideMessageBox()" class="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                    OK
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- Globals ---
+        let workbook = null;
+        const processButton = document.getElementById('processButton');
+        const statusMessage = document.getElementById('statusMessage');
+        const downloadLink = document.getElementById('downloadLink');
+        const summaryDiv = document.getElementById('summary');
+
+        // --- Utility Functions ---
+
+        // Function to show custom message box instead of alert()
+        function showMessageBox(title, content, isError = true) {
+            document.getElementById('messageTitle').textContent = title;
+            document.getElementById('messageTitle').className = isError ? 'text-lg font-bold mb-3 text-red-600' : 'text-lg font-bold mb-3 text-green-600';
+            document.getElementById('messageContent').textContent = content;
+            document.getElementById('messageBox').classList.remove('hidden');
+            document.getElementById('messageBox').classList.add('flex');
+        }
+
+        function hideMessageBox() {
+            document.getElementById('messageBox').classList.remove('flex');
+            document.getElementById('messageBox').classList.add('hidden');
+        }
+
+        // --- File Handling ---
+
+        function displayFileName(input) {
+            const fileNameDisplay = document.getElementById('fileNameDisplay');
+            const fileLabel = document.getElementById('fileLabel');
+
+            if (input.files.length > 0) {
+                const file = input.files[0];
+                fileNameDisplay.textContent = `File selected: ${file.name}`;
+                processButton.disabled = false;
+                processButton.classList.remove('bg-gray-400');
+                processButton.classList.add('bg-blue-600', 'hover:bg-blue-700');
+                fileLabel.classList.remove('border-blue-400');
+                fileLabel.classList.add('border-green-400');
+            } else {
+                fileNameDisplay.textContent = 'No file selected.';
+                processButton.disabled = true;
+                processButton.classList.add('bg-gray-400');
+                processButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                fileLabel.classList.remove('border-green-400');
+                fileLabel.classList.add('border-blue-400');
+            }
+        }
+
+        function readExcel(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        workbook = XLSX.read(data, { type: 'array' });
+                        const firstSheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[firstSheetName];
+                        // Convert sheet data to an array of JSON objects. Use raw values to preserve original headers.
+                        const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: true });
+                        
+                        // Extract headers (first row) and clean them aggressively
+                        const rawHeaders = rawData[0] || [];
+                        // Clean headers: Trim whitespace and handle null/undefined
+                        const headers = rawHeaders.map(h => (h || '').toString().trim()).filter(h => h.length > 0);
+                        
+                        // Extract data rows (rest of the rows)
+                        const rows = rawData.slice(1);
+
+                        // Re-map rows to object format using the cleaned headers
+                        const dataObjects = rows.map(row => {
+                            const obj = {};
+                            let isEmpty = true;
+                            // Use the cleaned headers for key names
+                            headers.forEach((key, index) => {
+                                const value = row[index];
+                                if (value !== null && value !== undefined && value !== '') {
+                                    isEmpty = false;
+                                }
+                                obj[key] = value;
+                            });
+                            // Only include rows that have at least one non-empty value
+                            return isEmpty ? null : obj;
+                        }).filter(obj => obj !== null); // Remove empty rows
+
+                        resolve({ headers, data: dataObjects });
+                    } catch (error) {
+                        console.error("File Read Error:", error);
+                        reject("Failed to read the file. Please ensure it is a valid Excel/CSV format.");
+                    }
+                };
+                reader.onerror = () => reject("Error reading file content.");
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // --- Data Cleaning Logic ---
+
+        /**
+         * Cleans, validates, and standardizes contact numbers.
+         * Preserves existing international codes (+XXX) but applies the default prefix 
+         * to local numbers (e.g., 050xxxx) that are missing a country code.
+         */
+        function cleanContactNumber(number, prefix) {
+            if (!number) return null;
+
+            let numStr = String(number).trim();
+
+            // 1. Remove invalid characters, keeping digits and the plus sign
+            // This handles spaces, dashes, parentheses, etc.
+            numStr = numStr.replace(/[^\d+]/g, '');
+            
+            // If cleaning left it empty or just '+', discard
+            if (numStr === '' || numStr === '+') return null;
+            
+            // Ensure prefix is clean (e.g., '+971')
+            const cleanPrefix = prefix.startsWith('+') ? prefix : '+' + prefix.replace(/[^\d]/g, '');
+            const prefixDigits = cleanPrefix.substring(1); // e.g., '971' (for local check)
+
+            // --- 2. Handle International Access Codes (00, 011) ---
+            if (numStr.startsWith('00') || numStr.startsWith('011')) {
+                // Replace international access code with '+'
+                // e.g., 0097150xxxxxxx -> +97150xxxxxxx
+                numStr = '+' + numStr.substring(numStr.startsWith('00') ? 2 : 3);
+            }
+
+            // --- 3. Handle Numbers Already Starting with + (International) ---
+            if (numStr.startsWith('+')) {
+                // If it's already international and meets a minimum length, return it.
+                // Minimum length check (10 is common for country code + 7 digits)
+                if (numStr.length >= 10) {
+                     return numStr; 
+                } else {
+                    return null; // Too short for a valid international number
+                }
+            }
+            
+            // --- 4. Detect and Fix International Numbers Missing '+' ---
+            // If the number is long (10+ digits) and does NOT start with '0' (local trunk) 
+            // OR the local country code digits, we assume it's an international number 
+            // missing the '+' sign.
+            if (numStr.length >= 10 && !numStr.startsWith('0') && !numStr.startsWith(prefixDigits)) {
+                // Prepend the missing '+' sign
+                numStr = '+' + numStr;
+                return numStr; 
+            }
+
+            // --- 5. Handle Local/Domestic Numbers (Apply the configured prefix) ---
+
+            // **Addressing the user request: Remove leading '0' for local numbers, then apply prefix.**
+            if (numStr.startsWith('0')) {
+                // Remove the local trunk code (e.g., 0501234567 -> 501234567)
+                numStr = numStr.substring(1);
+            }
+            
+            // Now, enforce the user-defined prefix (e.g., +971)
+            
+            if (numStr.startsWith(prefixDigits)) {
+                // Number starts with '971...' (needs the '+' sign added)
+                numStr = '+' + numStr;
+            } else {
+                // Prepend the full clean prefix (e.g., 501234567 -> +971501234567)
+                numStr = cleanPrefix + numStr;
+            }
+            
+            // Final comprehensive length check for the standardized number
+            // 10 is a safe minimum length to reject clearly incomplete numbers.
+            if (numStr.length < 10) { 
+                return null; // Reject numbers that are too short
+            }
+
+            return numStr;
+        }
+
+        function cleanAndDeduplicate(data, contactColHeader, prefix) {
+            let initialCount = data.length;
+            let cleanedData = [];
+            const seenNumbers = new Set();
+            let duplicatesRemoved = 0;
+            let emptyRemoved = 0;
+
+            for (const row of data) {
+                // Safely handle cases where the value might be null or undefined,
+                // and access the property using bracket notation to handle spaces/special characters in keys.
+                const rawNumber = row[contactColHeader];
+
+                // 1. Remove empty/null rows (if the primary contact field is missing)
+                if (rawNumber === null || rawNumber === undefined) {
+                    emptyRemoved++;
+                    continue;
+                }
+
+                // 2. Standardize Contact Number
+                const standardizedNumber = cleanContactNumber(rawNumber, prefix);
+
+                if (!standardizedNumber) {
+                    // If standardization fails (e.g., number is invalid after cleaning)
+                    emptyRemoved++;
+                    continue;
+                }
+
+                // 3. Deduplication Check
+                if (seenNumbers.has(standardizedNumber)) {
+                    duplicatesRemoved++;
+                    continue;
+                }
+
+                // Add to the set and the cleaned data
+                seenNumbers.add(standardizedNumber);
+                
+                // Update the row with the cleaned, standardized number
+                row[contactColHeader] = standardizedNumber;
+                
+                cleanedData.push(row);
+            }
+
+            return {
+                cleanedData,
+                initialCount,
+                duplicatesRemoved,
+                emptyRemoved,
+                finalCount: cleanedData.length
+            };
+        }
+
+        // --- Main Process Function ---
+
+        async function processData() {
+            const fileInput = document.getElementById('excelFile');
+            const file = fileInput.files[0];
+            
+            // Get user-defined headers
+            const nameColumn = document.getElementById('nameColumn').value.trim();
+            const contactColumn = document.getElementById('contactColumn').value.trim();
+            const countryPrefix = document.getElementById('countryPrefix').value.trim();
+            
+            if (!file) {
+                showMessageBox("No File", "Please select an Excel or CSV file to process.", true);
+                return;
+            }
+            if (!contactColumn || !nameColumn) {
+                showMessageBox("Missing Header", "Please ensure both the Name and Contact Number column headers are entered.", true);
+                return;
+            }
+
+            // Reset UI
+            statusMessage.textContent = 'Processing file... Please wait.';
+            processButton.disabled = true;
+            summaryDiv.classList.add('hidden');
+            downloadLink.classList.add('hidden');
+
+            try {
+                // 1. Read Data (reads ALL columns)
+                const { headers, data } = await readExcel(file);
+                
+                // Ensure the required columns exist by checking against the cleaned headers list
+                // We use .includes() but trim the user's input just in case.
+                const userContactCol = contactColumn.trim();
+                const userNameCol = nameColumn.trim();
+
+                if (!headers.includes(userContactCol)) {
+                    // Check if the column exists in the data objects produced by readExcel
+                    // This is a robust check in case SheetJS is doing something unusual with headers
+                    if (!data.some(row => Object.keys(row).includes(userContactCol))) {
+                        throw new Error(`The Contact Number column header "${userContactCol}" was not found in the file. Please check the spelling.`);
+                    }
+                }
+                if (!headers.includes(userNameCol)) {
+                    // Check if the column exists in the data objects produced by readExcel
+                     if (!data.some(row => Object.keys(row).includes(userNameCol))) {
+                        throw new Error(`The Name column header "${userNameCol}" was not found in the file. Please check the spelling.`);
+                    }
+                }
+
+                // 2. Clean and Deduplicate
+                // Note: We use the user's trimmed input for the column name keys
+                const results = cleanAndDeduplicate(data, userContactCol, countryPrefix);
+                const finalData = results.cleanedData;
+
+                // 3. Prepare for Download - FILTERING COLUMNS HERE
+                const outputHeaders = [userNameCol, userContactCol];
+
+                const outputData = finalData.map(row => {
+                    const newRow = {};
+                    // Use bracket notation to safely access the cleaned keys
+                    newRow[userContactCol] = row[userContactCol];
+                    newRow[userNameCol] = row[userNameCol] || ''; 
+                    return newRow;
+                });
+
+                const cleanedWorksheet = XLSX.utils.json_to_sheet(outputData, { header: outputHeaders });
+                const cleanedWorkbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(cleanedWorkbook, cleanedWorksheet, "WhatsApp List");
+                
+                const wopts = { bookType: 'xlsx', type: 'base64' };
+                const wbout = XLSX.write(cleanedWorkbook, wopts);
+                
+                // Convert base64 to Blob and create a download URL
+                const blob = new Blob([s2ab(atob(wbout))], { type: "application/octet-stream" });
+                downloadLink.href = URL.createObjectURL(blob);
+                
+                // 4. Update UI with Results
+                document.getElementById('initialCount').textContent = results.initialCount;
+                document.getElementById('emptyRemoved').textContent = results.emptyRemoved;
+                document.getElementById('duplicatesRemoved').textContent = results.duplicatesRemoved;
+                document.getElementById('finalCount').textContent = results.finalCount;
+
+                statusMessage.textContent = 'Data cleaning complete! Ready for download.';
+                summaryDiv.classList.remove('hidden');
+                downloadLink.classList.add('flex'); // Show the download button
+                downloadLink.classList.remove('hidden');
+
+
+            } catch (error) {
+                console.error("Processing Error:", error);
+                const errorMessage = (error instanceof Error) ? error.message : String(error);
+                showMessageBox("Data Processing Error", errorMessage, true);
+                statusMessage.textContent = 'An error occurred during processing.';
+                
+            } finally {
+                processButton.disabled = false;
+            }
+        }
+
+        // Utility function to convert string to ArrayBuffer for download
+        function s2ab(s) {
+            const buf = new ArrayBuffer(s.length);
+            const view = new Uint8Array(buf);
+            for (let i = 0; i < s.length; i++) view[i] = s.charCodeAt(i) & 0xFF;
+            return buf;
+        }
+
+        // Initialize state on load
+        document.addEventListener('DOMContentLoaded', () => {
+            if (document.getElementById('excelFile').files.length === 0) {
+                 processButton.classList.add('bg-gray-400');
+            }
+        });
+
+    </script>
+</body>
+</html>
